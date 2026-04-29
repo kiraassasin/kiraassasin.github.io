@@ -451,7 +451,7 @@ function loadConfig() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
 
-  fetch('https://cdn.jsdelivr.net/gh/kiraassasin/kiraassasin.github.io/data.json', { signal: controller.signal })
+  fetch('https://cdn.jsdelivr.net/gh/kiraassasin/kiraassasin.github.io@32014ce/data.json', { signal: controller.signal })
     .then(r => {
       clearTimeout(timeout);
       if (!r.ok) throw new Error('gagal');
