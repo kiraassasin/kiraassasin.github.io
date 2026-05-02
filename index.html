@@ -2,16 +2,13 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-
-<title>kiraassasin</title>
-
-<meta name="theme-color" content="#000000">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kiraassasin</title>
 <meta name="description" content="website pribadi saya">
 <meta name="keywords" content="editing, art galery, Lightroom, dll">
 <meta name="author" content="kiraassasin">
 <meta name="robots" content="index, follow">
-<meta name="color-scheme" content="dark light">
 
 <meta property="og:title" content="kiraassasin">
 <meta property="og:description" content="Lightroom editing">
@@ -19,13 +16,15 @@
 <meta property="og:url" content="kiraassasin.github.io">
 <meta property="og:type" content="website">
 
-<link rel="manifest" href="manifest.json">
 <link rel="icon" href="https://res.cloudinary.com/dlahkjp12/image/upload/v1777439680/ai_repair_20260429121358070_xggh4p.ico" type="image/x-icon">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="preconnect" href="https://res.cloudinary.com">
 <link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link rel="dns-prefetch" href="https://res.cloudinary.com">
+<!-- Performance hints -->
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<meta name="color-scheme" content="dark light">
+<meta http-equiv="x-dns-prefetch-control" content="on">
 <style>
 /* ── LOADING SCREEN ── */
 #page-loader {
@@ -1030,7 +1029,7 @@ function loadConfig() {
         }
     }, LOAD_TIMEOUT_MS);
     
-    fetch('https://cdn.jsdelivr.net/gh/kiraassasin/kiraassasin.github.io@0e317b3/data.json', {
+    fetch('./data.json', {
     signal: controller.signal,
     cache: 'no-store',
     headers: { 'Accept': 'application/json' }
@@ -1047,6 +1046,10 @@ function loadConfig() {
         if (!configLoaded) {
             saveCache(config);
             applyConfig(config);
+            // Track versi untuk deteksi update
+            if (config && config.version) {
+                _currentVersion = String(config.version);
+            }
             setTimeout(function() {
                 hideLoader();
                 clearTimeout(forceHideTimeout);
@@ -1089,7 +1092,107 @@ if (document.readyState === 'interactive' || document.readyState === 'complete')
     loadConfig();
 }
 
+/* ═══════════════════════════════════════════════════════════
+   UPDATE TOAST
+═══════════════════════════════════════════════════════════ */
+function showUpdateToast() {
+  let toast = document.getElementById('update-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'update-toast';
+    toast.style.cssText = [
+      'position:fixed',
+      'bottom:clamp(1rem,3vw,1.8rem)',
+      'left:50%',
+      'transform:translateX(-50%) translateY(16px)',
+      'background:var(--bg2,#111)',
+      'border:1px solid rgba(255,255,255,0.1)',
+      'border-radius:10px',
+      'padding:10px 18px',
+      'display:flex',
+      'align-items:center',
+      'gap:10px',
+      'font-family:"DM Sans",sans-serif',
+      'font-size:12px',
+      'color:var(--text2,#999)',
+      'letter-spacing:0.04em',
+      'z-index:9999',
+      'opacity:0',
+      'transition:opacity 0.4s ease,transform 0.4s cubic-bezier(0.34,1.4,0.64,1)',
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5)',
+      'white-space:nowrap',
+    ].join(';');
+    toast.innerHTML = '<span style="color:var(--accent,#c8a96e);font-size:15px">✦</span><span>Konten diperbarui</span>';
+    document.body.appendChild(toast);
+  }
+  requestAnimationFrame(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(16px)';
+  }, 3500);
+}
 
+/* ═══════════════════════════════════════════════════════════
+   VERSION TRACKING — bandingkan versi untuk deteksi update
+═══════════════════════════════════════════════════════════ */
+let _currentVersion = null;
+
+function onConfigLoaded(config) {
+  if (config && config.version) {
+    _currentVersion = String(config.version);
+  }
+}
+
+function applyUpdateFromSW(data) {
+  if (!data || typeof data !== 'object') return;
+  const newVer = String(data.version || '0');
+  // Hanya apply jika memang versi beda
+  if (_currentVersion && _currentVersion === newVer) return;
+  try {
+    applyConfig(data);
+    saveCache(data);
+    _currentVersion = newVer;
+    showUpdateToast();
+  } catch (e) {
+    console.warn('[App] Gagal apply update:', e);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CLIENT-SIDE VERSION POLL (backup jika SW tidak aktif)
+   Fetch data.json tiap kali tab aktif kembali
+═══════════════════════════════════════════════════════════ */
+function pollVersion() {
+  fetch('./data.json', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => { if (data) applyUpdateFromSW(data); })
+    .catch(() => {});
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') pollVersion();
+});
+
+/* ═══════════════════════════════════════════════════════════
+   SERVICE WORKER
+═══════════════════════════════════════════════════════════ */
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js', { scope: './' })
+    .then(reg => {
+      setInterval(() => reg.update().catch(() => {}), 60_000);
+    })
+    .catch(err => console.debug('[App] SW gagal:', err.message));
+
+  navigator.serviceWorker.addEventListener('message', evt => {
+    if (evt.data?.type === 'VERSION_UPDATE') {
+      applyUpdateFromSW(evt.data.data);
+    }
+  });
+}
 </script>
 </body>
 </html>
