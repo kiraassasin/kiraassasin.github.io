@@ -1,0 +1,22 @@
+{
+  "name": "Kira Assasin",
+  "short_name": "Kira",
+  "description": "Website portfolio dan project Kira Assasin",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://res.cloudinary.com/dlahkjp12/image/upload/v1777439680/ai_repair_20260429121358070_xggh4p.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://res.cloudinary.com/dlahkjp12/image/upload/v1777439680/ai_repair_20260429121358070_xggh4p.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
