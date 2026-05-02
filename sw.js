@@ -1,13 +1,27 @@
 'use strict';
 
-const SW_VER      = 'v4';
-const CACHE_IMG   = 'img-'   + SW_VER;   // Gambar Cloudinary — TIDAK pernah dihapus saat update
-const CACHE_FONT  = 'font-'  + SW_VER;   // Google Fonts — sangat jarang berubah
-const CACHE_SHELL = 'shell-' + SW_VER;   // HTML — stale-while-revalidate
-const CACHE_DATA  = 'data-'  + SW_VER;   // data.json fallback offline saja
+/* ═══════════════════════════════════════════════════════════════
+   SERVICE WORKER — Reliable, Real-time, High Performance
 
-const DATA_PATH   = 'data.json';
-const MAX_IMG     = 120;                  // Maksimum gambar di cache
+   PRINSIP DESAIN:
+   ┌─────────────────────────────────────────────────────────┐
+   │ 1. Image cache TIDAK PERNAH dihapus saat versi update   │
+   │    → URL Cloudinary immutable: URL sama = gambar sama   │
+   │                                                         │
+   │ 2. Version update = kirim data baru ke halaman saja     │
+   │    → Halaman apply real-time tanpa reload               │
+   │                                                         │
+   │ 3. data.json selalu fresh dari network                  │
+   │    → Cache hanya sebagai fallback offline               │
+   │                                                         │
+   │ 4. Cara update: ubah "version" di data.json → push      │
+   └─────────────────────────────────────────────────────────┘
+═══════════════════════════════════════════════════════════════ */
+
+const SW_VER      = 'v5';
+const CACHE_FONT  = 'font-'  + SW_VER;
+const CACHE_SHELL = 'shell-' + SW_VER;
+const CACHE_DATA  = 'data-'  + SW_VER;
 
 let knownVersion  = null;                 // Version terakhir yang diketahui
 
@@ -35,7 +49,7 @@ self.addEventListener('activate', evt => {
   evt.waitUntil(
     (async () => {
       // Hapus cache dari SW versi lama
-      const validCaches = new Set([CACHE_IMG, CACHE_FONT, CACHE_SHELL, CACHE_DATA]);
+      const validCaches = new Set([CACHE_FONT, CACHE_SHELL, CACHE_DATA]);
       const allKeys = await caches.keys();
       await Promise.all(
         allKeys
@@ -58,15 +72,17 @@ self.addEventListener('fetch', evt => {
 
   const url = new URL(evt.request.url);
 
-  // ── data.json → Network-first, versi dicheck, fallback cache
-  if (url.pathname.endsWith(DATA_PATH) || url.pathname.endsWith('data.json')) {
-    evt.respondWith(handleData(evt.request));
-    return;
-  }
+  // ── Gambar Cloudinary → JANGAN diintersep
+  // Browser punya HTTP cache bawaan yang lebih andal untuk cross-origin.
+  // SW fetch cross-origin Cloudinary sering gagal (opaque response / CORS).
+  if (url.hostname === 'res.cloudinary.com') return;
 
-  // ── Cloudinary → Cache-first, fetch jika belum ada
-  if (url.hostname === 'res.cloudinary.com') {
-    evt.respondWith(handleImage(evt.request));
+  // ── Gambar eksternal lain (Unsplash, dll) → jangan diintersep
+  if (evt.request.destination === 'image' && url.origin !== self.location.origin) return;
+
+  // ── data.json → Network-first, versi dicheck, fallback cache
+  if (url.pathname.endsWith('data.json')) {
+    evt.respondWith(handleData(evt.request));
     return;
   }
 
@@ -82,8 +98,10 @@ self.addEventListener('fetch', evt => {
     return;
   }
 
-  // ── Lainnya → network saja, no cache
-  evt.respondWith(fetch(evt.request).catch(() => new Response('', { status: 408 })));
+  // ── Lainnya (same-origin) → network dengan fallback cache
+  evt.respondWith(
+    fetch(evt.request).catch(() => caches.match(evt.request))
+  );
 });
 
 /* ──────────────────────────────────────────────────────────────
@@ -138,41 +156,6 @@ async function handleData(req) {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   HANDLER: Cloudinary images
-   Strategi: Cache-first → jika tidak ada, fetch & simpan
-   TIDAK PERNAH dihapus saat versi update (URL = immutable)
-────────────────────────────────────────────────────────────── */
-async function handleImage(req) {
-  // Key = URL tanpa query string (Cloudinary tidak pakai query)
-  const key = req.url.split('?')[0];
-
-  // Cek cache dulu
-  const cached = await caches.match(key);
-  if (cached) return cached;
-
-  // Fetch dari network — gunakan request original, jangan ubah mode
-  try {
-    const fresh = await fetch(req);
-    if (!fresh.ok || fresh.status === 0) {
-      // Opaque response atau error — jangan cache
-      return fresh;
-    }
-
-    // Simpan ke cache
-    const cache = await caches.open(CACHE_IMG);
-    await cache.put(key, fresh.clone());
-
-    // Trim jika terlalu banyak (async, tidak blocking)
-    trimImageCache().catch(() => {});
-
-    return fresh;
-  } catch {
-    // Offline dan tidak ada cache — return placeholder response
-    return new Response('', { status: 408, statusText: 'Offline' });
-  }
-}
-
-/* ──────────────────────────────────────────────────────────────
    HANDLER: Google Fonts
 ────────────────────────────────────────────────────────────── */
 async function handleFont(req) {
@@ -220,21 +203,6 @@ async function handleShell(req) {
   // Tidak ada cache — tunggu network
   const fresh = await networkFetch;
   return fresh || new Response('', { status: 408 });
-}
-
-/* ──────────────────────────────────────────────────────────────
-   TRIM IMAGE CACHE
-   Hapus entri terlama jika melebihi MAX_IMG
-────────────────────────────────────────────────────────────── */
-async function trimImageCache() {
-  try {
-    const cache = await caches.open(CACHE_IMG);
-    const keys  = await cache.keys();
-    if (keys.length <= MAX_IMG) return;
-    // Hapus dari depan (paling lama)
-    const toDelete = keys.slice(0, keys.length - MAX_IMG);
-    await Promise.all(toDelete.map(k => cache.delete(k)));
-  } catch (_) {}
 }
 
 /* ──────────────────────────────────────────────────────────────
