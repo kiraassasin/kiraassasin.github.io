@@ -23,6 +23,9 @@ const CACHE_FONT  = 'font-'  + SW_VER;
 const CACHE_SHELL = 'shell-' + SW_VER;
 const CACHE_DATA  = 'data-'  + SW_VER;
 
+// URL data.json — absolut berdasarkan lokasi SW agar tidak salah path
+const DATA_PATH = new URL('data.json', self.location.href).href;
+
 let knownVersion  = null;                 // Version terakhir yang diketahui
 
 /* ──────────────────────────────────────────────────────────────
@@ -81,7 +84,7 @@ self.addEventListener('fetch', evt => {
   if (evt.request.destination === 'image' && url.origin !== self.location.origin) return;
 
   // ── data.json → Network-first, versi dicheck, fallback cache
-  if (url.pathname.endsWith('data.json')) {
+  if (url.href === DATA_PATH || url.pathname.endsWith('data.json')) {
     evt.respondWith(handleData(evt.request));
     return;
   }
@@ -110,33 +113,28 @@ self.addEventListener('fetch', evt => {
              Jika offline → kembalikan cache (tidak hapus apapun)
 ────────────────────────────────────────────────────────────── */
 async function handleData(req) {
-  // Buat URL bersih ke data.json (hindari masalah path relatif)
-  const cleanUrl = new URL(DATA_PATH, req.url).href;
+  // Selalu pakai DATA_PATH absolut — hindari masalah relative path
+  const fetchUrl = DATA_PATH;
 
-  // ── Coba network first ──────────────────────────────────────
   try {
-    const netRes = await fetch(cleanUrl, {
-      cache: 'no-store',                  // Bypass browser HTTP cache
+    const netRes = await fetch(fetchUrl, {
+      cache: 'no-store',
       headers: { 'Accept': 'application/json' },
     });
 
     if (!netRes.ok) throw new Error('HTTP ' + netRes.status);
 
     const text = await netRes.text();
-    const data = JSON.parse(text);        // Validasi JSON
+    const data = JSON.parse(text);
 
-    // Simpan ke cache sebagai fallback offline
     const cache = await caches.open(CACHE_DATA);
-    await cache.put(cleanUrl, new Response(text, {
+    await cache.put(fetchUrl, new Response(text, {
       headers: { 'Content-Type': 'application/json' }
     }));
 
-    // Cek apakah versi berubah
     const newVer = String(data.version || '0');
     if (knownVersion && knownVersion !== newVer) {
       console.log('[SW] Versi berubah:', knownVersion, '→', newVer);
-      // PENTING: tidak menghapus cache gambar!
-      // Hanya kirim data baru ke semua tab
       await broadcastUpdate(newVer, data);
     }
     knownVersion = newVer;
@@ -144,13 +142,9 @@ async function handleData(req) {
     return new Response(text, { headers: { 'Content-Type': 'application/json' } });
 
   } catch (err) {
-    // ── Offline atau error → kembalikan dari cache ────────────
     console.debug('[SW] data.json offline, pakai cache:', err.message);
-    const cached = await caches.match(cleanUrl, { cacheName: CACHE_DATA })
-                || await caches.match('/data.json', { cacheName: CACHE_DATA });
+    const cached = await caches.match(fetchUrl, { cacheName: CACHE_DATA });
     if (cached) return cached;
-
-    // Tidak ada cache sama sekali
     return new Response('{}', { headers: { 'Content-Type': 'application/json' } });
   }
 }
